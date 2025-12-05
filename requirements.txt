@@ -2,3 +2,6 @@ fastapi
 uvicorn
 SQLAlchemy
 pydantic
+requests
+python-telegram-bot
+python-dotenv

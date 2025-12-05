@@ -1,9 +1,7 @@
-from fastapi import FastAPI, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
-import os
+import datetime
 
 from . import models, schemas
 from .database import engine, init_db, get_db
@@ -13,60 +11,70 @@ init_db()
 
 app = FastAPI(
     title="Neo-Cortex API",
-    description="Central Brain for NeoCognito Ecosystem",
-    version="0.1.0",
+    description="Headless Intelligence Layer for NeoCognito",
+    version="0.2.0",
 )
 
-# Monta o diretório static para servir arquivos CSS/JS
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# --- Ingestão e Sincronização ---
 
-# Configura o Jinja2 para templates HTML
-templates = Jinja2Templates(directory="templates")
+@app.post("/ingest/", response_model=schemas.ItemInDB)
+def ingest_item(item: schemas.ItemCreate, db: Session = Depends(get_db)):
+    """
+    Smart Ingest: Cria ou Atualiza um item baseado no source_id.
+    """
+    if item.source_id:
+        existing_item = db.query(models.Item).filter(
+            models.Item.source_id == item.source_id,
+            models.Item.source == item.source
+        ).first()
 
-# --- CRUD Operations for Items ---
+        if existing_item:
+            # Atualiza campos se existirem mudanças
+            existing_item.content = item.content
+            existing_item.due_date = item.due_date
+            existing_item.status = item.status
+            existing_item.is_pinned = item.is_pinned
+            # Recalcula prioridade aqui ou marca para reprocessamento
+            db.commit()
+            db.refresh(existing_item)
+            return existing_item
 
-@app.post("/items/", response_model=schemas.ItemInDB)
-def create_item(item: schemas.ItemCreate, db: Session = Depends(get_db)):
+    # Se não existe, cria novo
     db_item = models.Item(**item.dict())
+    # Aqui virá a chamada para o algoritmo de priorização inicial
+    # db_item.priority_score = calculate_priority(...) 
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
     return db_item
 
+# --- Leitura para o Conky (Output) ---
+
+@app.get("/dashboard/txt", response_class=PlainTextResponse)
+def get_dashboard_txt(limit: int = 10, db: Session = Depends(get_db)):
+    """
+    Retorna uma representação em texto puro formatada para o Conky.
+    """
+    # Busca itens ordenados por score (descendente) e data
+    items = db.query(models.Item).filter(
+        models.Item.status == "pending"
+    ).order_by(
+        models.Item.priority_score.desc(),
+        models.Item.due_date.asc()
+    ).limit(limit).all()
+
+    output = []
+    for item in items:
+        time_str = item.due_date.strftime("%H:%M") if item.due_date else "--:--"
+        icon = "!" if item.is_pinned else "•"
+        output.append(f"{icon} {time_str} - {item.content}")
+
+    if not output:
+        return "No active tasks."
+        
+    return "\n".join(output)
+
 @app.get("/items/", response_model=list[schemas.ItemInDB])
 def read_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     items = db.query(models.Item).offset(skip).limit(limit).all()
     return items
-
-@app.get("/items/{item_id}", response_model=schemas.ItemInDB)
-def read_item(item_id: int, db: Session = Depends(get_db)):
-    item = db.query(models.Item).filter(models.Item.id == item_id).first()
-    if item is None:
-        raise HTTPException(status_code=404, detail="Item not found")
-    return item
-
-# --- Web Interface (The Wall) ---
-
-@app.get("/", response_class=HTMLResponse)
-async def read_root(request: Request, db: Session = Depends(get_db)):
-    # Lógica para obter os itens e categorizá-los para o "Wall"
-    # Por enquanto, apenas busca todos os itens
-    items = db.query(models.Item).order_by(models.Item.target_time).all()
-    
-    # Preparar dados para o template (substituir por lógica de categorização inteligente)
-    critical_items = [item for item in items if item.category == "critical"]
-    scheduled_items = [item for item in items if item.category == "scheduled"]
-    routine_items = [item for item in items if item.category == "routine"]
-    backlog_items = [item for item in items if item.category == "backlog"]
-
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "critical_items": critical_items,
-            "scheduled_items": scheduled_items,
-            "routine_items": routine_items,
-            "backlog_items": backlog_items,
-        }
-    )
-

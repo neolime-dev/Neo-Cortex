@@ -2,4 +2,3 @@ fastapi
 uvicorn
 SQLAlchemy
 pydantic
-jinja2

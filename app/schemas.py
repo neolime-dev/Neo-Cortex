@@ -3,27 +3,32 @@ import datetime
 from typing import Optional
 
 class ItemBase(BaseModel):
-    message: str
-    target_time: datetime.datetime
+    content: str
+    source: str
+    source_id: Optional[str] = None
+    due_date: Optional[datetime.datetime] = None
     status: str = "pending"
-    permanent: bool = False
-    mute: bool = False
-    repeat: int = 1
-    priority: int = 0
-    category: str = "unassigned"
-    original_id: Optional[str] = None # O ID do reminder-cli
+    is_pinned: bool = False
+    raw_data: Optional[str] = None
 
 class ItemCreate(ItemBase):
     pass
 
-class ItemUpdate(ItemBase):
+class ItemUpdate(BaseModel):
+    # Permitir atualizar campos individuais
+    content: Optional[str] = None
+    due_date: Optional[datetime.datetime] = None
     status: Optional[str] = None
-    priority: Optional[int] = None
-    category: Optional[str] = None
+    is_pinned: Optional[bool] = None
+    priority_score: Optional[int] = None
+    smart_category: Optional[str] = None
 
 class ItemInDB(ItemBase):
     id: int
     created_at: datetime.datetime
+    completed_at: Optional[datetime.datetime] = None
+    priority_score: int
+    smart_category: str
 
     class Config:
-        from_attributes = True # Habilita o modo ORM para ler dados do SQLAlchemy (Pydantic V2)
+        from_attributes = True
